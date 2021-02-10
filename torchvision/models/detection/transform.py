@@ -40,9 +40,14 @@ def _resize_image_and_masks(image, self_min_size, self_max_size, target):
     scale_factor = self_min_size / min_size
     if max_size * scale_factor > self_max_size:
         scale_factor = self_max_size / max_size
+    print("XXX image.shape:")
+    print(image.shape)
+    image_cpu = image.cpu()
+    image_none = image_cpu[None]
     image = torch.nn.functional.interpolate(
-        image[None], scale_factor=scale_factor, mode='bilinear', recompute_scale_factor=True,
+        image_none, scale_factor=scale_factor, mode='bilinear', recompute_scale_factor=True,
         align_corners=False)[0]
+    image = image.to(device=torch.device('vulkan'))
 
     if target is None:
         return image, target
@@ -100,8 +105,10 @@ class GeneralizedRCNNTransform(nn.Module):
             if image.dim() != 3:
                 raise ValueError("images is expected to be a list of 3d tensors "
                                  "of shape [C, H, W], got {}".format(image.shape))
+            image = image.cpu()
             image = self.normalize(image)
             image, target_index = self.resize(image, target_index)
+            image = image.to(device=torch.device('vulkan'))
             images[i] = image
             if targets is not None and target_index is not None:
                 targets[i] = target_index
@@ -210,11 +217,12 @@ class GeneralizedRCNNTransform(nn.Module):
         max_size[2] = int(math.ceil(float(max_size[2]) / stride) * stride)
 
         batch_shape = [len(images)] + max_size
+        images = [image.cpu() for image in images]
         batched_imgs = images[0].new_full(batch_shape, 0)
         for img, pad_img in zip(images, batched_imgs):
             pad_img[: img.shape[0], : img.shape[1], : img.shape[2]].copy_(img)
 
-        return batched_imgs
+        return batched_imgs.to(device=torch.device('vulkan'))
 
     def postprocess(self,
                     result,               # type: List[Dict[str, Tensor]]
